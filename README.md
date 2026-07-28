@@ -1,6 +1,6 @@
 # 📜 QuestTrackerMod for Sineus Arena
 
-A lightweight, high-performance **Quest & Achievement Tracker Mod** for **Sineus Arena**, built using BepInEx 5.
+A lightweight, high-performance **Quest Tracker Mod** for **Sineus Arena**, built using BepInEx 5.
 
 ---
 
