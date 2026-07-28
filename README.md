@@ -8,14 +8,13 @@ A lightweight, high-performance **Quest Tracker Mod** for **Sineus Arena**, buil
 
 **QuestTrackerMod** brings real-time in-game quest and achievement tracking directly onto your screen while playing *Sineus Arena*. 
 
-No more opening full-screen menus mid-combat to check how close you are to completing an objective! QuestTrackerMod sorts your active quests by **"Almost Done First"**, translates raw localization/Russian keys into clean natural English, lets you pin your favorite quests, and features a sleek, non-intrusive dark obsidian glass interface.
+QuestTrackerMod sorts your active quests by **"Almost Done First"**, lets you pin your favorite quests.
 
 ### ✨ Key Features:
 - **🔄 Single-Key View Cycling (`Q`)**: Seamlessly cycle between **Small HUD Window** ➔ **Big Quest Window** ➔ **Hidden**.
 - **🔥 "Almost Done First" Sorting**: Automatically ranks active uncompleted quests by progress percentage so you always know which quests are nearest completion.
 - **📌 Quest Pinning System**: Pin your favorite quests so they stay permanently anchored at the top of both the HUD and main window across game sessions.
 - **📐 Fully Resizable & Draggable**: Drag windows anywhere on screen and resize them using the bottom-right corner grip (**`◢`**).
-- **🌐 Pure English Formatting**: Cleans technical raw keys (`common herolifesteal chance` ➔ *Lifesteal Chance*), translates Cyrillic terms, and formats scroll stacks & map objectives cleanly.
 - **⚡ Zero Stutter Performance**: Optimized definition caching and zero-allocation progress reading for smooth 60+ FPS gameplay.
 
 ---
