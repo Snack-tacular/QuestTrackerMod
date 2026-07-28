@@ -28,75 +28,116 @@ namespace QuestTrackerMod
         public QuestDefinition Definition = null!;
         public string QuestId = "";
         public string Title = "";
-        public string Description = "";
+        public string DescPattern = ""; // Pre-parsed description template
+        public string CachedDescription = "";
         public QuestCategory Category;
-        public int CurrentProgress;
-        public int RequiredProgress;
-        public float Percent; // 0.0f to 1.0f
-        public bool IsCompleted;
-        public bool IsRewarded;
-        public int Remaining;
-        public bool IsPinned;
+        public int CurrentProgress = -1;
+        public int RequiredProgress = 1;
+        public float Percent = 0.0f;
+        public bool IsCompleted = false;
+        public bool IsRewarded = false;
+        public int Remaining = 0;
+        public bool IsPinned = false;
+        public bool IsSessionQuest = false;
 
         public bool IsAlmostDone(float threshold)
         {
             return !IsCompleted && !IsRewarded && Percent >= threshold;
         }
 
-        public static QuestDataModel FromDefinition(QuestDefinition q, HashSet<string> pinnedIds)
+        public bool UpdateProgress(HashSet<string> pinnedIds)
         {
+            if (Definition == null) return false;
+
             int cur = 0;
             bool completed = false;
             bool rewarded = false;
 
             try
             {
-                cur = QuestProgressRepository.GetProgress(q);
-                completed = QuestProgressRepository.IsCompleted(q);
-                rewarded = QuestProgressRepository.IsRewarded(q);
+                cur = QuestProgressRepository.GetProgress(Definition);
+                completed = QuestProgressRepository.IsCompleted(Definition);
+                rewarded = QuestProgressRepository.IsRewarded(Definition);
             }
             catch { }
 
+            if (cur >= RequiredProgress)
+            {
+                completed = true;
+            }
+
+            bool pinned = pinnedIds != null && pinnedIds.Contains(QuestId);
+
+            if (cur == CurrentProgress && completed == IsCompleted && rewarded == IsRewarded && pinned == IsPinned)
+            {
+                return false; // No changes, zero allocations!
+            }
+
+            CurrentProgress = cur;
+            IsCompleted = completed;
+            IsRewarded = rewarded;
+            IsPinned = pinned;
+            Percent = Mathf.Clamp01((float)cur / RequiredProgress);
+            Remaining = Mathf.Max(0, RequiredProgress - cur);
+
+            FormatDescriptionFast();
+            return true;
+        }
+
+        private void FormatDescriptionFast()
+        {
+            if (string.IsNullOrEmpty(DescPattern))
+            {
+                CachedDescription = $"Progress: {CurrentProgress} / {RequiredProgress}";
+                return;
+            }
+
+            if (DescPattern.Contains("{0}") && DescPattern.Contains("{1}"))
+            {
+                CachedDescription = string.Format(DescPattern, CurrentProgress, RequiredProgress);
+            }
+            else
+            {
+                CachedDescription = $"{DescPattern} ({CurrentProgress} / {RequiredProgress})";
+            }
+        }
+
+        // Static Pre-Parsing (Runs ONCE when quest definitions are cached!)
+        public static QuestDataModel CreateStaticModel(QuestDefinition q, HashSet<string> pinnedIds)
+        {
+            string qId = q.questId ?? q.name ?? "Quest";
             int req = 1;
             if (q.condition != null && q.condition.RequiredProgress > 0)
             {
                 req = q.condition.RequiredProgress;
             }
 
-            if (cur >= req)
-            {
-                completed = true;
-            }
+            string title = FormatTitleStatic(q);
+            string descPattern = BuildDescPatternStatic(q, req);
 
-            float pct = Mathf.Clamp01((float)cur / req);
-            string qId = q.questId ?? q.name ?? "Quest";
-            bool isPinned = pinnedIds != null && pinnedIds.Contains(qId);
-
-            return new QuestDataModel
+            var model = new QuestDataModel
             {
                 Definition = q,
                 QuestId = qId,
-                Title = FormatTitle(q),
-                Description = FormatDescription(q, cur, req),
+                Title = title,
+                DescPattern = descPattern,
                 Category = q.category,
-                CurrentProgress = cur,
                 RequiredProgress = req,
-                Percent = pct,
-                IsCompleted = completed,
-                IsRewarded = rewarded,
-                Remaining = Mathf.Max(0, req - cur),
-                IsPinned = isPinned
+                IsSessionQuest = !q.persistProgress
             };
+
+            model.UpdateProgress(pinnedIds);
+            return model;
         }
 
-        private static string FormatTitle(QuestDefinition q)
+        private static string FormatTitleStatic(QuestDefinition q)
         {
             if (q == null) return "Unknown Quest";
 
             if (q.condition != null)
             {
                 string condType = q.condition.GetType().Name;
-                string targetName = ExtractTargetNameFromCondition(q.condition);
+                string targetName = ExtractTargetNameFromConditionStatic(q.condition);
 
                 switch (condType)
                 {
@@ -109,7 +150,7 @@ namespace QuestTrackerMod
                         return !string.IsNullOrEmpty(targetName) ? $"Weapon Master: {targetName}" : "Weapon Master";
                     case "KillBossTotalQuestCondition":
                     case "BossKillTimedQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? FormatBossTitle(targetName) : "Boss Hunter";
+                        return !string.IsNullOrEmpty(targetName) ? FormatBossTitleStatic(targetName) : "Boss Hunter";
                     case "KillMobsTotalQuestCondition":
                         return "Monster Slayer";
                     case "KillSpecificMobsTotalQuestCondition":
@@ -141,10 +182,10 @@ namespace QuestTrackerMod
 
             string rawName = q.name;
             if (string.IsNullOrEmpty(rawName)) rawName = q.questId;
-            return CleanText(rawName);
+            return CleanTextStatic(rawName);
         }
 
-        private static string FormatBossTitle(string targetName)
+        private static string FormatBossTitleStatic(string targetName)
         {
             if (string.IsNullOrEmpty(targetName)) return "Boss Hunter";
             if (targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase))
@@ -154,107 +195,79 @@ namespace QuestTrackerMod
             return $"Boss Hunter: {targetName}";
         }
 
-        private static string FormatDescription(QuestDefinition q, int cur, int req)
+        private static string BuildDescPatternStatic(QuestDefinition q, int req)
         {
-            if (q == null) return "";
-
-            try
-            {
-                if (q.condition != null)
-                {
-                    string desc = q.condition.GetProgressDescription(cur);
-                    if (!string.IsNullOrEmpty(desc) && !ContainsCyrillic(desc) && !desc.StartsWith("QUEST_") && !desc.Contains("{0}"))
-                    {
-                        return SanitizeDescriptionText(desc);
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                if (q.localizedDescription != null)
-                {
-                    string loc = q.localizedDescription.GetLocalizedString();
-                    if (!string.IsNullOrEmpty(loc) && !ContainsCyrillic(loc) && !loc.StartsWith("QUEST_"))
-                    {
-                        return $"{SanitizeDescriptionText(loc)} ({cur} / {req})";
-                    }
-                }
-            }
-            catch { }
+            if (q == null) return "Progress:";
 
             if (q.condition != null)
             {
                 string condType = q.condition.GetType().Name;
-                string targetName = ExtractTargetNameFromCondition(q.condition);
+                string targetName = ExtractTargetNameFromConditionStatic(q.condition);
 
                 switch (condType)
                 {
                     case "KillMobsTotalQuestCondition":
-                        return $"Slay monsters ({cur} / {req})";
+                        return "Slay monsters";
                     case "KillSpecificMobsTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay {targetName} ({cur} / {req})" : $"Slay target monsters ({cur} / {req})";
+                        return !string.IsNullOrEmpty(targetName) ? $"Slay {targetName}" : "Slay target monsters";
                     case "KillBossTotalQuestCondition":
                         if (!string.IsNullOrEmpty(targetName))
                         {
                             string bossLabel = targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase) ? targetName : $"Boss {targetName}";
-                            return $"Defeat {bossLabel} ({cur} / {req})";
+                            return $"Defeat {bossLabel}";
                         }
-                        return $"Defeat Boss ({cur} / {req})";
+                        return "Defeat Boss";
                     case "BossKillTimedQuestCondition":
-                        float timeLimit = GetSingleField(q.condition, "timeLimitSeconds", 180f);
+                        float timeLimit = GetSingleFieldStatic(q.condition, "timeLimitSeconds", 180f);
                         if (!string.IsNullOrEmpty(targetName))
                         {
                             string bossLabel = targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase) ? targetName : $"Boss {targetName}";
-                            return $"Defeat {bossLabel} under {timeLimit:F0}s ({cur} / {req})";
+                            return $"Defeat {bossLabel} under {timeLimit:F0}s";
                         }
-                        return $"Defeat Boss under {timeLimit:F0}s ({cur} / {req})";
+                        return $"Defeat Boss under {timeLimit:F0}s";
                     case "HeroLevelQuestCondition":
-                        int reqLvl = GetIntField(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName} (Lvl {cur} / {reqLvl})" : $"Reach Hero Level {reqLvl} ({cur} / {reqLvl})";
+                        int reqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
+                        return !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName} (Lvl {{0}} / {reqLvl})" : $"Reach Hero Level {reqLvl} (Lvl {{0}} / {reqLvl})";
                     case "KillWithHeroTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName} ({cur} / {req})" : $"Slay monsters with hero ({cur} / {req})";
+                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with hero";
                     case "KillWithWeaponQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName} ({cur} / {req})" : $"Slay monsters with weapon ({cur} / {req})";
+                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with weapon";
                     case "WeaponLevelQuestCondition":
-                        int wReqLvl = GetIntField(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Upgrade {targetName} to Level {wReqLvl} ({cur} / {wReqLvl})" : $"Upgrade weapon to Level {wReqLvl} ({cur} / {wReqLvl})";
+                        int wReqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
+                        return !string.IsNullOrEmpty(targetName) ? $"Upgrade {targetName} to Level {wReqLvl}" : $"Upgrade weapon to Level {wReqLvl}";
                     case "OpenChestsTotalQuestCondition":
-                        return $"Open treasure chests ({cur} / {req})";
+                        return "Open treasure chests";
                     case "ClearLairsTotalQuestCondition":
-                        return $"Clear lairs ({cur} / {req})";
+                        return "Clear lairs";
                     case "ShrineActivateQuestCondition":
-                        return $"Activate beacon shrines ({cur} / {req})";
+                        return "Activate beacon shrines";
                     case "SurviveTimeQuestCondition":
-                        float timeS = GetSingleField(q.condition, "survivalSeconds", req);
+                        float timeS = GetSingleFieldStatic(q.condition, "survivalSeconds", req);
                         int reqMin = (int)(timeS / 60);
                         int reqSec = (int)(timeS % 60);
-                        int curMin = cur / 60;
-                        int curSec = cur % 60;
-                        return $"Survive for {reqMin}m {reqSec:D2}s ({curMin}m {curSec:D2}s / {reqMin}m {reqSec:D2}s)";
+                        return $"Survive for {reqMin}m {reqSec:D2}s";
                     case "UseBellsTotalQuestCondition":
-                        return $"Ring Bells ({cur} / {req})";
+                        return "Ring Bells";
                     case "UseFoxesTotalQuestCondition":
-                        return $"Use Fox Shrines ({cur} / {req})";
+                        return "Use Fox Shrines";
                     case "ArtifactCollectQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Collect artifact: {targetName} ({cur} / {req})" : $"Collect artifacts ({cur} / {req})";
+                        return !string.IsNullOrEmpty(targetName) ? $"Collect artifact: {targetName}" : "Collect artifacts";
                     case "BoostLevelQuestCondition":
-                        int bReqLvl = GetIntField(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName} ({cur} / {bReqLvl})" : $"Reach {bReqLvl} stacks ({cur} / {bReqLvl})";
+                        int bReqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
+                        return !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName} ({{0}} / {bReqLvl})" : $"Reach {bReqLvl} stacks";
                     case "BagCollectQuestCondition":
-                        return $"Collect Bags ({cur} / {req})";
+                        return "Collect Bags";
                     case "MapClearQuestCondition":
-                        return $"Clear stages ({cur} / {req})";
+                        return "Clear stages";
                     case "CompleteQuestsTotalQuestCondition":
-                        return $"Complete quests ({cur} / {req})";
+                        return "Complete quests";
                 }
             }
 
-            return $"Progress: {cur} / {req}";
+            return "Progress:";
         }
 
-        private static bool ContainsCyrillic(string text)
+        private static bool ContainsCyrillicStatic(string text)
         {
             if (string.IsNullOrEmpty(text)) return false;
             foreach (char c in text)
@@ -264,7 +277,7 @@ namespace QuestTrackerMod
             return false;
         }
 
-        private static string ExtractTargetNameFromCondition(object condition)
+        private static string ExtractTargetNameFromConditionStatic(object condition)
         {
             if (condition == null) return "";
             try
@@ -277,7 +290,7 @@ namespace QuestTrackerMod
                     object heroObj = fHero.GetValue(condition);
                     if (heroObj != null)
                     {
-                        string name = GetCleanNameFromObject(heroObj);
+                        string name = GetCleanNameFromObjectStatic(heroObj);
                         if (!string.IsNullOrEmpty(name)) return name;
                     }
                 }
@@ -288,7 +301,7 @@ namespace QuestTrackerMod
                     object artObj = fArt.GetValue(condition);
                     if (artObj != null)
                     {
-                        string name = GetCleanNameFromObject(artObj);
+                        string name = GetCleanNameFromObjectStatic(artObj);
                         if (!string.IsNullOrEmpty(name)) return name;
                     }
                 }
@@ -299,7 +312,7 @@ namespace QuestTrackerMod
                     object bObj = fBoost.GetValue(condition);
                     if (bObj != null)
                     {
-                        string name = GetCleanNameFromObject(bObj);
+                        string name = GetCleanNameFromObjectStatic(bObj);
                         if (!string.IsNullOrEmpty(name)) return name;
                     }
                 }
@@ -308,7 +321,7 @@ namespace QuestTrackerMod
                 if (fBoss != null)
                 {
                     string bossStr = fBoss.GetValue(condition) as string ?? "";
-                    if (!string.IsNullOrEmpty(bossStr)) return CleanText(bossStr);
+                    if (!string.IsNullOrEmpty(bossStr)) return CleanTextStatic(bossStr);
                 }
 
                 var fMobs = type.GetField("mobNames", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -317,7 +330,7 @@ namespace QuestTrackerMod
                     string[] mobArr = fMobs.GetValue(condition) as string[];
                     if (mobArr != null && mobArr.Length > 0 && !string.IsNullOrEmpty(mobArr[0]))
                     {
-                        return CleanText(mobArr[0]);
+                        return CleanTextStatic(mobArr[0]);
                     }
                 }
 
@@ -328,7 +341,7 @@ namespace QuestTrackerMod
                     if (wepVal != null)
                     {
                         string wepStr = wepVal.ToString() ?? "";
-                        if (!string.IsNullOrEmpty(wepStr)) return CleanText(wepStr);
+                        if (!string.IsNullOrEmpty(wepStr)) return CleanTextStatic(wepStr);
                     }
                 }
             }
@@ -336,7 +349,7 @@ namespace QuestTrackerMod
             return "";
         }
 
-        private static string GetCleanNameFromObject(object obj)
+        private static string GetCleanNameFromObjectStatic(object obj)
         {
             if (obj == null) return "";
             try
@@ -347,41 +360,41 @@ namespace QuestTrackerMod
                 if (pHero != null)
                 {
                     string val = pHero.GetValue(obj) as string ?? "";
-                    if (!string.IsNullOrEmpty(val)) return CleanText(val);
+                    if (!string.IsNullOrEmpty(val)) return CleanTextStatic(val);
                 }
 
                 var pDisp = type.GetField("displayName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (pDisp != null)
                 {
                     string val = pDisp.GetValue(obj) as string ?? "";
-                    if (!string.IsNullOrEmpty(val)) return CleanText(val);
+                    if (!string.IsNullOrEmpty(val)) return CleanTextStatic(val);
                 }
 
                 var pName = type.GetProperty("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (pName != null)
                 {
                     string val = pName.GetValue(obj) as string ?? "";
-                    if (!string.IsNullOrEmpty(val)) return CleanText(val);
+                    if (!string.IsNullOrEmpty(val)) return CleanTextStatic(val);
                 }
 
                 var fName = type.GetField("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (fName != null)
                 {
                     string val = fName.GetValue(obj) as string ?? "";
-                    if (!string.IsNullOrEmpty(val)) return CleanText(val);
+                    if (!string.IsNullOrEmpty(val)) return CleanTextStatic(val);
                 }
             }
             catch { }
-            return CleanText(obj.ToString() ?? "");
+            return CleanTextStatic(obj.ToString() ?? "");
         }
 
-        private static string CleanText(string text)
+        private static string CleanTextStatic(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
 
-            if (ContainsCyrillic(text))
+            if (ContainsCyrillicStatic(text))
             {
-                text = TranslateRussianTerm(text);
+                text = TranslateRussianTermStatic(text);
             }
 
             text = text.Replace("Quest_", "").Replace("quest_", "")
@@ -389,16 +402,16 @@ namespace QuestTrackerMod
                        .Replace("QUEST_", "").Replace("LOC_", "")
                        .Replace("(Clone)", "").Trim();
 
-            text = CleanBoostOrStatName(text);
+            text = CleanBoostOrStatNameStatic(text);
 
-            if (text.Length > 0 && !ContainsCyrillic(text))
+            if (text.Length > 0 && !ContainsCyrillicStatic(text))
             {
                 return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text);
             }
             return "Objective";
         }
 
-        private static string CleanBoostOrStatName(string text)
+        private static string CleanBoostOrStatNameStatic(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
 
@@ -428,46 +441,7 @@ namespace QuestTrackerMod
             return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(cleaned);
         }
 
-        private static string SanitizeDescriptionText(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return "";
-
-            text = text.Replace("sacred bells", "Bells")
-                       .Replace("Sacred bells", "Bells")
-                       .Replace("Sacred Bells", "Bells")
-                       .Replace("spirit foxes", "Fox Shrines")
-                       .Replace("Spirit foxes", "Fox Shrines")
-                       .Replace("Spirit Foxes", "Fox Shrines")
-                       .Replace("Boss Boss", "Boss")
-                       .Replace("boss Boss", "Boss")
-                       .Replace("enemy lairs", "lairs")
-                       .Replace("Enemy lairs", "Lairs")
-                       .Replace("Enemy Lairs", "Lairs")
-                       .Replace("loot bags", "Bags")
-                       .Replace("Loot bags", "Bags")
-                       .Replace("Loot Bags", "Bags")
-                       .Replace("common ", "")
-                       .Replace("hero ", "")
-                       .Replace("Hero ", "")
-                       .Replace("herolifesteal", "Lifesteal")
-                       .Replace("movespeed", "Movement Speed")
-                       .Replace("attackspeed", "Attack Speed");
-
-            if (text.StartsWith("Upgrade boost ", StringComparison.OrdinalIgnoreCase) || text.StartsWith("Upgrade ", StringComparison.OrdinalIgnoreCase))
-            {
-                Match match = Regex.Match(text, @"Upgrade (?:boost )?(.+?) to (?:level|Lvl) (\d+)", RegexOptions.IgnoreCase);
-                if (match.Success)
-                {
-                    string statName = CleanBoostOrStatName(match.Groups[1].Value);
-                    string level = match.Groups[2].Value;
-                    text = $"Reach {level} stacks of {statName}";
-                }
-            }
-
-            return text;
-        }
-
-        private static string TranslateRussianTerm(string text)
+        private static string TranslateRussianTermStatic(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
             if (text.Contains("Светоч") || text.Contains("светоч")) return "Beacon Shrine";
@@ -481,7 +455,7 @@ namespace QuestTrackerMod
             return "";
         }
 
-        private static int GetIntField(object obj, string fieldName, int fallback)
+        private static int GetIntFieldStatic(object obj, string fieldName, int fallback)
         {
             try
             {
@@ -492,7 +466,7 @@ namespace QuestTrackerMod
             return fallback;
         }
 
-        private static float GetSingleField(object obj, string fieldName, float fallback)
+        private static float GetSingleFieldStatic(object obj, string fieldName, float fallback)
         {
             try
             {
@@ -515,8 +489,11 @@ namespace QuestTrackerMod
         // Pinned Quest IDs
         private HashSet<string> _pinnedQuestIds = new HashSet<string>();
 
-        // Cached Quest Definitions (Cached ONCE to eliminate CPU stutters!)
-        private List<QuestDefinition> _cachedQuestDefinitions = new List<QuestDefinition>();
+        // Pre-parsed Quest Data Models (Created ONCE to guarantee ZERO stutter!)
+        private List<QuestDataModel> _models = new List<QuestDataModel>();
+
+        // Sorted Display List
+        private List<QuestDataModel> _sortedModels = new List<QuestDataModel>();
 
         // UI State - Main Window
         private Rect _windowRect = new Rect(120, 90, 620, 580);
@@ -529,13 +506,12 @@ namespace QuestTrackerMod
         private Rect _hudWindowRect = new Rect(1200, 50, 330, 280);
         private Vector2 _hudScrollPos = Vector2.zero;
 
-        // Window Resizing State (Global Screen Coordinates)
+        // Window Resizing State
         private bool _isResizingMain = false;
         private bool _isResizingHUD = false;
         private Vector2 _dragStartPos;
         private Vector2 _windowStartSize;
 
-        private List<QuestDataModel> _cachedQuests = new List<QuestDataModel>();
         private float _lastFetchTime = -10f;
         private const float REFRESH_INTERVAL = 0.5f;
 
@@ -585,8 +561,6 @@ namespace QuestTrackerMod
         private Texture2D? _pinInactiveTex;
         private Texture2D? _pinHoverTex;
 
-        private static FieldInfo? _questServiceDbField;
-
         private void Start()
         {
             LoadPinnedQuestIds();
@@ -605,12 +579,6 @@ namespace QuestTrackerMod
 
             try
             {
-                _questServiceDbField = typeof(QuestService).GetField("_database", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            }
-            catch { }
-
-            try
-            {
                 if (QuestService.I != null)
                 {
                     QuestService.I.OnProgressChanged += OnQuestProgressUpdated;
@@ -619,7 +587,7 @@ namespace QuestTrackerMod
             }
             catch { }
 
-            CacheQuestDefinitionsIfNeeded(true);
+            InitializeModelsOnce();
         }
 
         private void LoadPinnedQuestIds()
@@ -658,7 +626,7 @@ namespace QuestTrackerMod
                 _pinnedQuestIds.Add(questId);
             }
             SavePinnedQuestIds();
-            RefreshQuests(true);
+            UpdateAllProgress(true);
         }
 
         private void OnQuestProgressUpdated(QuestDefinition quest)
@@ -675,20 +643,72 @@ namespace QuestTrackerMod
                 
                 if (_displayMode == QuestTrackerDisplayMode.BigWindow || _displayMode == QuestTrackerDisplayMode.SmallWindow)
                 {
-                    RefreshQuests(true);
+                    UpdateAllProgress(true);
                 }
             }
 
             if (Time.time - _lastFetchTime >= REFRESH_INTERVAL)
             {
-                RefreshQuests(false);
+                UpdateAllProgress(false);
             }
         }
 
-        private void CacheQuestDefinitionsIfNeeded(bool force = false)
+        private void InitializeModelsOnce()
         {
-            if (_cachedQuestDefinitions.Count > 0 && !force) return;
+            if (_models.Count > 0) return;
 
+            var rawDefs = FetchAllQuestDefinitions();
+            var list = new List<QuestDataModel>();
+
+            foreach (var q in rawDefs)
+            {
+                if (q != null)
+                {
+                    list.Add(QuestDataModel.CreateStaticModel(q, _pinnedQuestIds));
+                }
+            }
+
+            _models = list;
+            SortModels();
+        }
+
+        private void UpdateAllProgress(bool forceSort)
+        {
+            _lastFetchTime = Time.time;
+
+            if (_models.Count == 0)
+            {
+                InitializeModelsOnce();
+                return;
+            }
+
+            bool anyChanged = false;
+            foreach (var model in _models)
+            {
+                if (model.UpdateProgress(_pinnedQuestIds))
+                {
+                    anyChanged = true;
+                }
+            }
+
+            if (anyChanged || forceSort || _sortedModels.Count != _models.Count)
+            {
+                SortModels();
+            }
+        }
+
+        private void SortModels()
+        {
+            _sortedModels = _models.OrderByDescending(q => q.IsPinned)
+                                   .ThenBy(q => q.IsCompleted || q.IsRewarded ? 1 : 0)
+                                   .ThenByDescending(q => q.Percent)
+                                   .ThenBy(q => q.Remaining)
+                                   .ThenBy(q => q.Title)
+                                   .ToList();
+        }
+
+        private List<QuestDefinition> FetchAllQuestDefinitions()
+        {
             var list = new List<QuestDefinition>();
 
             try
@@ -730,43 +750,25 @@ namespace QuestTrackerMod
             {
                 try
                 {
-                    var defs = Resources.FindObjectsOfTypeAll<QuestDefinition>();
-                    if (defs != null)
+                    var dbs = Resources.FindObjectsOfTypeAll<QuestDatabase>();
+                    if (dbs != null)
                     {
-                        foreach (var q in defs)
+                        foreach (var db in dbs)
                         {
-                            if (q != null && !list.Contains(q)) list.Add(q);
+                            if (db != null && db.Quests != null)
+                            {
+                                foreach (var q in db.Quests)
+                                {
+                                    if (q != null && !list.Contains(q)) list.Add(q);
+                                }
+                            }
                         }
                     }
                 }
                 catch { }
             }
 
-            _cachedQuestDefinitions = list;
-        }
-
-        private void RefreshQuests(bool force)
-        {
-            _lastFetchTime = Time.time;
-
-            // Ensure definitions are cached without heavy Resources scanning every 0.5s!
-            CacheQuestDefinitionsIfNeeded(force);
-
-            var list = new List<QuestDataModel>(_cachedQuestDefinitions.Count);
-            foreach (var q in _cachedQuestDefinitions)
-            {
-                if (q != null)
-                {
-                    list.Add(QuestDataModel.FromDefinition(q, _pinnedQuestIds));
-                }
-            }
-
-            _cachedQuests = list.OrderByDescending(q => q.IsPinned)
-                                .ThenBy(q => q.IsCompleted || q.IsRewarded ? 1 : 0)
-                                .ThenByDescending(q => q.Percent)
-                                .ThenBy(q => q.Remaining)
-                                .ThenBy(q => q.Title)
-                                .ToList();
+            return list;
         }
 
         private static QuestDatabase? GetDatabaseFromObject(object obj)
@@ -796,7 +798,6 @@ namespace QuestTrackerMod
         {
             InitStylesIfNeeded();
 
-            // Global Mouse Drag Listener for Window Resizing
             HandleGlobalResizeDrag();
 
             switch (_displayMode)
@@ -874,8 +875,8 @@ namespace QuestTrackerMod
             float threshold = Plugin.CfgAlmostDoneThreshold?.Value ?? 0.50f;
             int maxItems = Plugin.CfgCompactHUDMaxItems?.Value ?? 5;
 
-            var pinnedQuests = _cachedQuests.Where(q => q.IsPinned && !q.IsCompleted && !q.IsRewarded).ToList();
-            var unpinnedAlmostDone = _cachedQuests.Where(q => !q.IsPinned && !q.IsCompleted && !q.IsRewarded && q.Percent >= threshold).ToList();
+            var pinnedQuests = _sortedModels.Where(q => q.IsPinned && !q.IsCompleted && !q.IsRewarded).ToList();
+            var unpinnedAlmostDone = _sortedModels.Where(q => !q.IsPinned && !q.IsCompleted && !q.IsRewarded && q.Percent >= threshold).ToList();
 
             var displayQuests = pinnedQuests.Concat(unpinnedAlmostDone).Take(maxItems).ToList();
 
@@ -912,7 +913,7 @@ namespace QuestTrackerMod
                     GUILayout.Label($"{(q.Percent * 100f):F0}%", _hudItemTitleStyle);
                     GUILayout.EndHorizontal();
 
-                    GUILayout.Label(q.Description, _hudItemStyle);
+                    GUILayout.Label(q.CachedDescription, _hudItemStyle);
                     GUILayout.Space(2);
 
                     Rect barRect = GUILayoutUtility.GetRect(GUIContent.none, GUIStyle.none, GUILayout.Height(6), GUILayout.ExpandWidth(true));
@@ -1001,7 +1002,7 @@ namespace QuestTrackerMod
             float threshold = Plugin.CfgAlmostDoneThreshold?.Value ?? 0.50f;
             bool hideCompletedInAlmostDone = Plugin.CfgHideCompletedInAlmostDone?.Value ?? true;
 
-            var filtered = _cachedQuests.Where(q =>
+            var filtered = _sortedModels.Where(q =>
             {
                 switch (_currentTab)
                 {
@@ -1027,7 +1028,7 @@ namespace QuestTrackerMod
                 {
                     string sq = _searchQuery.ToLowerInvariant();
                     bool matchTitle = q.Title.ToLowerInvariant().Contains(sq);
-                    bool matchDesc = q.Description.ToLowerInvariant().Contains(sq);
+                    bool matchDesc = q.CachedDescription.ToLowerInvariant().Contains(sq);
                     bool matchId = q.QuestId.ToLowerInvariant().Contains(sq);
                     if (!matchTitle && !matchDesc && !matchId) return false;
                 }
@@ -1036,7 +1037,7 @@ namespace QuestTrackerMod
             }).ToList();
 
             int totalFiltered = filtered.Count;
-            int almostDoneCount = _cachedQuests.Count(q => q.IsAlmostDone(threshold));
+            int almostDoneCount = _sortedModels.Count(q => q.IsAlmostDone(threshold));
             int pinnedCount = _pinnedQuestIds.Count;
 
             GUILayout.BeginHorizontal();
@@ -1142,10 +1143,10 @@ namespace QuestTrackerMod
 
             GUILayout.Space(3);
 
-            // Row 2: Description
-            if (!string.IsNullOrEmpty(quest.Description))
+            // Row 2: Cached Description
+            if (!string.IsNullOrEmpty(quest.CachedDescription))
             {
-                GUILayout.Label(quest.Description, _questDescStyle);
+                GUILayout.Label(quest.CachedDescription, _questDescStyle);
                 GUILayout.Space(4);
             }
 
@@ -1188,11 +1189,10 @@ namespace QuestTrackerMod
             _cardBgTexture = MakeBorderTex(4, 4, colCardBg, colCardBorder, 1);
             _barBgTexture = MakeTex(2, 2, colBarTrack);
 
-            _barFillAlmostDoneTexture = MakeGradientTex(2, 16, new Color(1.0f, 0.75f, 0.15f, 1f), new Color(0.95f, 0.50f, 0.05f, 1f)); // Gold / Amber
-            _barFillActiveTexture = MakeGradientTex(2, 16, new Color(0.10f, 0.70f, 1.0f, 1f), new Color(0.05f, 0.45f, 0.85f, 1f));     // Cyan / Blue
-            _barFillCompletedTexture = MakeGradientTex(2, 16, new Color(0.15f, 0.85f, 0.40f, 1f), new Color(0.05f, 0.60f, 0.25f, 1f));  // Emerald Green
+            _barFillAlmostDoneTexture = MakeGradientTex(2, 16, new Color(1.0f, 0.75f, 0.15f, 1f), new Color(0.95f, 0.50f, 0.05f, 1f));
+            _barFillActiveTexture = MakeGradientTex(2, 16, new Color(0.10f, 0.70f, 1.0f, 1f), new Color(0.05f, 0.45f, 0.85f, 1f));
+            _barFillCompletedTexture = MakeGradientTex(2, 16, new Color(0.15f, 0.85f, 0.40f, 1f), new Color(0.05f, 0.60f, 0.25f, 1f));
 
-            // ── Custom Modern Scrollbar Styling ──
             Color colScrollTrack = new Color(0.08f, 0.10f, 0.16f, 0.85f);
             Color colScrollThumbNormal = new Color(0.24f, 0.35f, 0.52f, 0.90f);
             Color colScrollThumbHover = new Color(0.95f, 0.72f, 0.15f, 1.0f);
@@ -1218,7 +1218,6 @@ namespace QuestTrackerMod
             GUI.skin.verticalScrollbarDownButton.fixedWidth = 0f;
             GUI.skin.verticalScrollbarDownButton.fixedHeight = 0f;
 
-            // Custom Button & Tab Textures with Hover Support
             _tabInactiveTex = MakeTex(2, 2, new Color(0.11f, 0.13f, 0.19f, 0.90f));
             _tabHoverTex    = MakeGradientTex(2, 16, new Color(0.18f, 0.24f, 0.36f, 1.0f), new Color(0.14f, 0.18f, 0.28f, 1.0f));
             _tabActiveTex   = MakeGradientTex(2, 16, new Color(0.20f, 0.45f, 0.85f, 1.0f), new Color(0.12f, 0.30f, 0.65f, 1.0f));
