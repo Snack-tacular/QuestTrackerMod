@@ -70,7 +70,7 @@ namespace QuestTrackerMod
 
             if (cur == CurrentProgress && completed == IsCompleted && rewarded == IsRewarded && pinned == IsPinned)
             {
-                return false; // No changes, zero allocations!
+                return false;
             }
 
             CurrentProgress = cur;
@@ -92,14 +92,7 @@ namespace QuestTrackerMod
                 return;
             }
 
-            if (DescPattern.Contains("{0}") && DescPattern.Contains("{1}"))
-            {
-                CachedDescription = string.Format(DescPattern, CurrentProgress, RequiredProgress);
-            }
-            else
-            {
-                CachedDescription = $"{DescPattern} ({CurrentProgress} / {RequiredProgress})";
-            }
+            CachedDescription = $"{DescPattern} ({CurrentProgress} / {RequiredProgress})";
         }
 
         // Static Pre-Parsing (Runs ONCE when quest definitions are cached!)
@@ -227,7 +220,7 @@ namespace QuestTrackerMod
                         return $"Defeat Boss under {timeLimit:F0}s";
                     case "HeroLevelQuestCondition":
                         int reqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName} (Lvl {{0}} / {reqLvl})" : $"Reach Hero Level {reqLvl} (Lvl {{0}} / {reqLvl})";
+                        return !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName}" : $"Reach Hero Level {reqLvl}";
                     case "KillWithHeroTotalQuestCondition":
                         return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with hero";
                     case "KillWithWeaponQuestCondition":
@@ -254,7 +247,7 @@ namespace QuestTrackerMod
                         return !string.IsNullOrEmpty(targetName) ? $"Collect artifact: {targetName}" : "Collect artifacts";
                     case "BoostLevelQuestCondition":
                         int bReqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName} ({{0}} / {bReqLvl})" : $"Reach {bReqLvl} stacks";
+                        return !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName}" : $"Reach {bReqLvl} stacks";
                     case "BagCollectQuestCondition":
                         return "Collect Bags";
                     case "MapClearQuestCondition":
@@ -489,7 +482,7 @@ namespace QuestTrackerMod
         // Pinned Quest IDs
         private HashSet<string> _pinnedQuestIds = new HashSet<string>();
 
-        // Pre-parsed Quest Data Models (Created ONCE to guarantee ZERO stutter!)
+        // Pre-parsed Quest Data Models
         private List<QuestDataModel> _models = new List<QuestDataModel>();
 
         // Sorted Display List
