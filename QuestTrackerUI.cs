@@ -127,6 +127,8 @@ namespace QuestTrackerMod
         {
             if (q == null) return "Unknown Quest";
 
+            string result = "Objective";
+
             if (q.condition != null)
             {
                 string condType = q.condition.GetType().Name;
@@ -135,52 +137,79 @@ namespace QuestTrackerMod
                 switch (condType)
                 {
                     case "HeroLevelQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Hero Mastery: {targetName}" : "Hero Mastery";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Hero Mastery: {targetName}" : "Hero Mastery";
+                        break;
                     case "KillWithHeroTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Hero Slayer: {targetName}" : "Hero Slayer";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Hero Slayer: {targetName}" : "Hero Slayer";
+                        break;
                     case "KillWithWeaponQuestCondition":
                     case "WeaponLevelQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Weapon Master: {targetName}" : "Weapon Master";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Weapon Master: {targetName}" : "Weapon Master";
+                        break;
                     case "KillBossTotalQuestCondition":
                     case "BossKillTimedQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? FormatBossTitleStatic(targetName) : "Boss Hunter";
+                        result = !string.IsNullOrEmpty(targetName) ? FormatBossTitleStatic(targetName) : "Boss Hunter";
+                        break;
                     case "KillMobsTotalQuestCondition":
-                        return "Monster Slayer";
+                        result = "Monster Slayer";
+                        break;
                     case "KillSpecificMobsTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Huntsman: {targetName}" : "Targeted Hunt";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Huntsman: {targetName}" : "Targeted Hunt";
+                        break;
                     case "OpenChestsTotalQuestCondition":
-                        return "Treasure Hunter";
+                        result = "Treasure Hunter";
+                        break;
                     case "ClearLairsTotalQuestCondition":
-                        return "Lair Purger";
+                        result = "Lair Purger";
+                        break;
                     case "ShrineActivateQuestCondition":
-                        return "Beacon Pilgrim";
+                        result = "Beacon Pilgrim";
+                        break;
                     case "SurviveTimeQuestCondition":
-                        return "Survivalist";
+                        result = "Survivalist";
+                        break;
                     case "UseBellsTotalQuestCondition":
-                        return "Bells";
+                        result = "Bells";
+                        break;
                     case "UseFoxesTotalQuestCondition":
-                        return "Fox Shrines";
+                        result = "Fox Shrines";
+                        break;
                     case "ArtifactCollectQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Relic Collector: {targetName}" : "Relic Collector";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Relic Collector: {targetName}" : "Relic Collector";
+                        break;
                     case "BoostLevelQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Scroll: {targetName}" : "Scroll Stacks";
+                        result = !string.IsNullOrEmpty(targetName) ? $"Scroll: {targetName}" : "Scroll Stacks";
+                        break;
                     case "BagCollectQuestCondition":
-                        return "Loot Bags";
+                        result = "Loot Bags";
+                        break;
                     case "MapClearQuestCondition":
-                        return "Stage Conqueror";
+                        result = "Stage Conqueror";
+                        break;
                     case "CompleteQuestsTotalQuestCondition":
-                        return "Master Adventurer";
+                        result = "Master Adventurer";
+                        break;
+                    default:
+                        string rawName = q.name;
+                        if (string.IsNullOrEmpty(rawName)) rawName = q.questId;
+                        result = CleanTextStatic(rawName);
+                        break;
                 }
             }
+            else
+            {
+                string rawName = q.name;
+                if (string.IsNullOrEmpty(rawName)) rawName = q.questId;
+                result = CleanTextStatic(rawName);
+            }
 
-            string rawName = q.name;
-            if (string.IsNullOrEmpty(rawName)) rawName = q.questId;
-            return CleanTextStatic(rawName);
+            return ApplySpecificRenamesStatic(result);
         }
 
         private static string FormatBossTitleStatic(string targetName)
         {
             if (string.IsNullOrEmpty(targetName)) return "Boss Hunter";
+            targetName = ApplySpecificRenamesStatic(targetName);
             if (targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase))
             {
                 return $"Defeat {targetName}";
@@ -192,6 +221,8 @@ namespace QuestTrackerMod
         {
             if (q == null) return "Progress:";
 
+            string pattern = "Progress:";
+
             if (q.condition != null)
             {
                 string condType = q.condition.GetType().Name;
@@ -200,64 +231,89 @@ namespace QuestTrackerMod
                 switch (condType)
                 {
                     case "KillMobsTotalQuestCondition":
-                        return "Slay monsters";
+                        pattern = "Slay monsters";
+                        break;
                     case "KillSpecificMobsTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay {targetName}" : "Slay target monsters";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Slay {targetName}" : "Slay target monsters";
+                        break;
                     case "KillBossTotalQuestCondition":
                         if (!string.IsNullOrEmpty(targetName))
                         {
                             string bossLabel = targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase) ? targetName : $"Boss {targetName}";
-                            return $"Defeat {bossLabel}";
+                            pattern = $"Defeat {bossLabel}";
                         }
-                        return "Defeat Boss";
+                        else
+                        {
+                            pattern = "Defeat Boss";
+                        }
+                        break;
                     case "BossKillTimedQuestCondition":
                         float timeLimit = GetSingleFieldStatic(q.condition, "timeLimitSeconds", 180f);
                         if (!string.IsNullOrEmpty(targetName))
                         {
                             string bossLabel = targetName.StartsWith("Boss", StringComparison.OrdinalIgnoreCase) ? targetName : $"Boss {targetName}";
-                            return $"Defeat {bossLabel} under {timeLimit:F0}s";
+                            pattern = $"Defeat {bossLabel} under {timeLimit:F0}s";
                         }
-                        return $"Defeat Boss under {timeLimit:F0}s";
+                        else
+                        {
+                            pattern = $"Defeat Boss under {timeLimit:F0}s";
+                        }
+                        break;
                     case "HeroLevelQuestCondition":
                         int reqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName}" : $"Reach Hero Level {reqLvl}";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Reach Level {reqLvl} with {targetName}" : $"Reach Hero Level {reqLvl}";
+                        break;
                     case "KillWithHeroTotalQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with hero";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with hero";
+                        break;
                     case "KillWithWeaponQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with weapon";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Slay monsters with {targetName}" : "Slay monsters with weapon";
+                        break;
                     case "WeaponLevelQuestCondition":
                         int wReqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Upgrade {targetName} to Level {wReqLvl}" : $"Upgrade weapon to Level {wReqLvl}";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Upgrade {targetName} to Level {wReqLvl}" : $"Upgrade weapon to Level {wReqLvl}";
+                        break;
                     case "OpenChestsTotalQuestCondition":
-                        return "Open treasure chests";
+                        pattern = "Open treasure chests";
+                        break;
                     case "ClearLairsTotalQuestCondition":
-                        return "Clear lairs";
+                        pattern = "Clear lairs";
+                        break;
                     case "ShrineActivateQuestCondition":
-                        return "Activate beacon shrines";
+                        pattern = "Activate beacon shrines";
+                        break;
                     case "SurviveTimeQuestCondition":
                         float timeS = GetSingleFieldStatic(q.condition, "survivalSeconds", req);
                         int reqMin = (int)(timeS / 60);
                         int reqSec = (int)(timeS % 60);
-                        return $"Survive for {reqMin}m {reqSec:D2}s";
+                        pattern = $"Survive for {reqMin}m {reqSec:D2}s";
+                        break;
                     case "UseBellsTotalQuestCondition":
-                        return "Ring Bells";
+                        pattern = "Ring Bells";
+                        break;
                     case "UseFoxesTotalQuestCondition":
-                        return "Use Fox Shrines";
+                        pattern = "Use Fox Shrines";
+                        break;
                     case "ArtifactCollectQuestCondition":
-                        return !string.IsNullOrEmpty(targetName) ? $"Collect artifact: {targetName}" : "Collect artifacts";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Collect artifact: {targetName}" : "Collect artifacts";
+                        break;
                     case "BoostLevelQuestCondition":
                         int bReqLvl = GetIntFieldStatic(q.condition, "requiredLevel", req);
-                        return !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName}" : $"Reach {bReqLvl} stacks";
+                        pattern = !string.IsNullOrEmpty(targetName) ? $"Reach {bReqLvl} stacks of {targetName}" : $"Reach {bReqLvl} stacks";
+                        break;
                     case "BagCollectQuestCondition":
-                        return "Collect Bags";
+                        pattern = "Collect Bags";
+                        break;
                     case "MapClearQuestCondition":
-                        return "Clear stages";
+                        pattern = "Clear stages";
+                        break;
                     case "CompleteQuestsTotalQuestCondition":
-                        return "Complete quests";
+                        pattern = "Complete quests";
+                        break;
                 }
             }
 
-            return "Progress:";
+            return ApplySpecificRenamesStatic(pattern);
         }
 
         private static bool ContainsCyrillicStatic(string text)
@@ -284,7 +340,7 @@ namespace QuestTrackerMod
                     if (heroObj != null)
                     {
                         string name = GetCleanNameFromObjectStatic(heroObj);
-                        if (!string.IsNullOrEmpty(name)) return name;
+                        if (!string.IsNullOrEmpty(name)) return ApplySpecificRenamesStatic(name);
                     }
                 }
 
@@ -295,7 +351,7 @@ namespace QuestTrackerMod
                     if (artObj != null)
                     {
                         string name = GetCleanNameFromObjectStatic(artObj);
-                        if (!string.IsNullOrEmpty(name)) return name;
+                        if (!string.IsNullOrEmpty(name)) return ApplySpecificRenamesStatic(name);
                     }
                 }
 
@@ -306,7 +362,7 @@ namespace QuestTrackerMod
                     if (bObj != null)
                     {
                         string name = GetCleanNameFromObjectStatic(bObj);
-                        if (!string.IsNullOrEmpty(name)) return name;
+                        if (!string.IsNullOrEmpty(name)) return ApplySpecificRenamesStatic(name);
                     }
                 }
 
@@ -314,7 +370,7 @@ namespace QuestTrackerMod
                 if (fBoss != null)
                 {
                     string bossStr = fBoss.GetValue(condition) as string ?? "";
-                    if (!string.IsNullOrEmpty(bossStr)) return CleanTextStatic(bossStr);
+                    if (!string.IsNullOrEmpty(bossStr)) return ApplySpecificRenamesStatic(CleanTextStatic(bossStr));
                 }
 
                 var fMobs = type.GetField("mobNames", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -323,7 +379,7 @@ namespace QuestTrackerMod
                     string[] mobArr = fMobs.GetValue(condition) as string[];
                     if (mobArr != null && mobArr.Length > 0 && !string.IsNullOrEmpty(mobArr[0]))
                     {
-                        return CleanTextStatic(mobArr[0]);
+                        return ApplySpecificRenamesStatic(CleanTextStatic(mobArr[0]));
                     }
                 }
 
@@ -334,7 +390,7 @@ namespace QuestTrackerMod
                     if (wepVal != null)
                     {
                         string wepStr = wepVal.ToString() ?? "";
-                        if (!string.IsNullOrEmpty(wepStr)) return CleanTextStatic(wepStr);
+                        if (!string.IsNullOrEmpty(wepStr)) return ApplySpecificRenamesStatic(CleanTextStatic(wepStr));
                     }
                 }
             }
@@ -397,6 +453,8 @@ namespace QuestTrackerMod
 
             text = CleanBoostOrStatNameStatic(text);
 
+            text = ApplySpecificRenamesStatic(text);
+
             if (text.Length > 0 && !ContainsCyrillicStatic(text))
             {
                 return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text);
@@ -432,6 +490,22 @@ namespace QuestTrackerMod
             if (string.IsNullOrWhiteSpace(cleaned)) return "Scroll";
 
             return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(cleaned);
+        }
+
+        private static string ApplySpecificRenamesStatic(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            text = Regex.Replace(text, @"\b(Storm\s*Anchor)\b", "Cursed Anchor", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Black\s*Hole)\b", "Ancient Cube", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Soup)\b", "Ogre's Stew", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Hammer\s*Chaos)\b", "Hammer of Chaos", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Ice\s*Zone)\b", "Ice Walk", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Ritual\s*Niddle|Ritual\s*Needle|Niddle)\b", "Needle", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Staff)\b", "Follower of the Will", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(Toxic\s*Bomb)\b", "Acid Bomb", RegexOptions.IgnoreCase);
+
+            return text;
         }
 
         private static string TranslateRussianTermStatic(string text)
